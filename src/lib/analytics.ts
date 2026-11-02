@@ -24,6 +24,7 @@
 // same "explicit event, no magic" posture as sentry.ts.
 
 import PostHog from "posthog-react-native"
+import { HOSTED_INTEGRATIONS_ENABLED } from "./private-build"
 import * as SecureStore from "expo-secure-store"
 import { log } from "./logbuffer"
 
@@ -106,6 +107,7 @@ export enum AnalyticsEvent {
 export type ConnectionTestSource = "onboarding" | "edit_test" | "sse"
 
 export function initAnalytics() {
+  if (!HOSTED_INTEGRATIONS_ENABLED) return
   if (enabled) return
   if (!API_KEY) {
     log.info("analytics", "no API key configured — analytics disabled")

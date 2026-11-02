@@ -235,13 +235,13 @@ export default function SettingsScreen() {
         <SettingRow
           icon="shield-checkmark"
           label={t("settings.privacy.crashReporting.label")}
-          description={t("settings.privacy.crashReporting.description")}
+          description="Disabled in this private build (analytics and crash uploads)."
           isDark={isDark}
           right={
             <Switch
               value={crashReporting}
               onValueChange={handleCrashReportingToggle}
-              disabled={telemetryUpdating}
+              disabled={true}
               trackColor={{ false: "#767577", true: "#22c55e" }}
             />
           }

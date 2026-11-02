@@ -24,6 +24,7 @@ import { parseUrl } from "../../src/lib/diagnostics-classify"
 import { buildAuth } from "../../src/lib/auth"
 import { AnalyticsEvent, track } from "../../src/lib/analytics"
 import { submitWaitlistSignup, buildWaitlistMailtoUrl, needsManualEscapeHatch, type QueuedSignup } from "../../src/lib/waitlist"
+import { HOSTED_INTEGRATIONS_ENABLED } from "../../src/lib/private-build"
 import { flushPendingSignups, queuePendingSignup, readPendingSignups, dropPendingSignup } from "../../src/lib/waitlist-queue-storage"
 import appJson from "../../app.json"
 
@@ -253,6 +254,7 @@ export default function AddConnectionScreen() {
   }
 
   const handleJoinWaitlist = async () => {
+    if (!HOSTED_INTEGRATIONS_ENABLED) return
     if (waitlistState === "submitting") return
     const attemptedEmail = waitlistEmail
     setWaitlistState("submitting")
@@ -445,7 +447,7 @@ export default function AddConnectionScreen() {
         </View>
 
         {/* OpenCode Connect — Coming Soon */}
-        <View style={[styles.connectCard, isDark && styles.connectCardDark]}>
+        {HOSTED_INTEGRATIONS_ENABLED && <View style={[styles.connectCard, isDark && styles.connectCardDark]}>
           <View style={styles.connectCardHeader}>
             <Ionicons name="cloud-done-outline" size={28} color="#6366f1" />
             <View style={styles.connectCardTitles}>
@@ -519,7 +521,7 @@ export default function AddConnectionScreen() {
               </TouchableOpacity>
             </>
           )}
-        </View>
+        </View>}
 
         {/* Advanced mode link */}
         <TouchableOpacity style={styles.advancedLink} onPress={() => setMode("advanced")}>
@@ -560,6 +562,7 @@ export default function AddConnectionScreen() {
         ].map((opt) => (
           <TouchableOpacity
             key={opt.type}
+            disabled={opt.type === "cloud" && !HOSTED_INTEGRATIONS_ENABLED}
             style={[
               styles.typeOption,
               isDark && styles.typeOptionDark,
