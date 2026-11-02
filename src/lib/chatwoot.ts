@@ -12,6 +12,8 @@
 // This module is dependency-injected and imports no React Native / Expo
 // packages so it runs under `node --test`.
 
+import { HOSTED_INTEGRATIONS_ENABLED } from "./private-build.ts"
+
 const REQUEST_TIMEOUT_MS = 15_000
 
 export interface ChatwootDeps {
@@ -26,6 +28,7 @@ interface ChatwootConfig {
 }
 
 export function getChatwootConfig(): ChatwootConfig | null {
+  if (!HOSTED_INTEGRATIONS_ENABLED) return null
   const inboxIdentifier = process.env.EXPO_PUBLIC_CHATWOOT_INBOX_IDENTIFIER
   if (!inboxIdentifier) return null
   const baseUrl = (process.env.EXPO_PUBLIC_CHATWOOT_BASE_URL || "https://support.agentlabs.cc").replace(/\/+$/, "")

@@ -2,6 +2,7 @@
 // parallel probes that classify *why* it failed, instead of swallowing the
 // opaque RN "Network request failed" string.
 import { Platform, Share } from "react-native"
+import { HOSTED_INTEGRATIONS_ENABLED } from "./private-build"
 import * as Clipboard from "expo-clipboard"
 import * as Device from "expo-device"
 import * as SecureStore from "expo-secure-store"
@@ -43,6 +44,9 @@ export interface DiagnosticReport {
 // auth failed or the server errored. The root probe only checks reachability
 // (any HTTP response, even an error status, proves something is listening).
 async function timedFetch(name: string, target: string, init?: RequestInit, opts?: { requireOk?: boolean }): Promise<ProbeAttempt> {
+  if (name === "internet" && !HOSTED_INTEGRATIONS_ENABLED) {
+    return { name, target: "disabled", ok: false, durationMs: 0, error: "Public internet probe disabled in private build" }
+  }
   const requireOk = opts?.requireOk ?? true
   const start = Date.now()
   const controller = new AbortController()

@@ -22,6 +22,7 @@
  */
 
 import * as SecureStore from "expo-secure-store"
+import { HOSTED_INTEGRATIONS_ENABLED } from "./private-build"
 import { disableSentry, initSentry, sentryEnabled } from "./sentry"
 import { initAnalytics, shutdownAnalytics, analyticsEnabled, trackAppOpened } from "./analytics"
 
@@ -37,6 +38,10 @@ let transition = Promise.resolve()
  * Returns 'unknown' if the user has never been asked.
  */
 export async function loadTelemetryConsent(): Promise<ConsentState> {
+  if (!HOSTED_INTEGRATIONS_ENABLED) {
+    _resolved = false
+    return "denied"
+  }
   try {
     const stored = await SecureStore.getItemAsync(CONSENT_KEY)
     if (stored === "granted") {
@@ -63,6 +68,7 @@ export async function loadTelemetryConsent(): Promise<ConsentState> {
  * false = denied.
  */
 export function hasTelemetryConsent(): boolean | null {
+  if (!HOSTED_INTEGRATIONS_ENABLED) return false
   return _resolved
 }
 
@@ -71,6 +77,7 @@ export function hasTelemetryConsent(): boolean | null {
  * running, initialise it immediately.
  */
 export function setTelemetryConsent(granted: boolean): Promise<void> {
+  if (!HOSTED_INTEGRATIONS_ENABLED) granted = false
   const next = transition.then(() => applyTelemetryConsent(granted))
   transition = next.catch(() => undefined)
   return next

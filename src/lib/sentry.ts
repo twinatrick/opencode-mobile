@@ -14,6 +14,7 @@
 //      lives in ./sentry-noise.ts so it is unit-testable without the RN SDK.
 
 import * as Sentry from "@sentry/react-native"
+import { HOSTED_INTEGRATIONS_ENABLED } from "./private-build"
 import appJson from "../../app.json"
 import { log } from "./logbuffer"
 import { NoiseGate, eventText, isFatalEvent, isTransportNoise } from "./sentry-noise"
@@ -30,6 +31,7 @@ let handlersInstalled = false
 const noiseGate = new NoiseGate()
 
 export function initSentry() {
+  if (!HOSTED_INTEGRATIONS_ENABLED) return
   if (enabled) return
   if (!DSN) {
     log.info("sentry", "no DSN configured — telemetry disabled")

@@ -27,6 +27,7 @@
  */
 
 import { Platform } from "react-native"
+import { HOSTED_INTEGRATIONS_ENABLED } from "./private-build"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import appJson from "../../app.json"
 import {
@@ -41,8 +42,8 @@ export type { AvailableUpdate }
 /** Same source Sentry uses for `release`, so the two always agree. */
 export const CURRENT_VERSION = (appJson as { expo?: { version?: string } }).expo?.version ?? "unknown"
 
-const RELEASES_API = "https://api.github.com/repos/dzianisv/opencode-mobile/releases/latest"
-const RELEASES_PAGE = "https://github.com/dzianisv/opencode-mobile/releases/latest"
+const RELEASES_API = "https://api.github.com/repos/twinatrick/opencode-mobile/releases/latest"
+const RELEASES_PAGE = "https://github.com/twinatrick/opencode-mobile/releases/latest"
 const TIMEOUT_MS = 8000
 
 const storage: UpdateStorage = {
@@ -81,6 +82,7 @@ export async function checkForUpdate(options?: {
   ignoreDismissed?: boolean
 }): Promise<AvailableUpdate | null> {
   if (Platform.OS !== "android") return null
+  if (!HOSTED_INTEGRATIONS_ENABLED) return null
   return resolveUpdate({
     storage,
     fetchLatest: fetchLatestRelease,

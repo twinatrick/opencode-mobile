@@ -1,0 +1,67 @@
+name: Private Android review build
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npm run check:versions
+      - run: npm run typecheck
+      - run: npm test
+
+  build:
+    if: github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v4
+      - run: npm ci --legacy-peer-deps
+      - name: Generate native project
+        run: npx expo prebuild --platform android --no-install
+      - name: Disable upstream source-map upload and release signing
+        run: |
+          sed -i '/apply from.*sentry.gradle/d' android/app/build.gradle
+          sed -i '/signingConfig /s/signingConfig .*/signingConfig null/' android/app/build.gradle
+      - name: Build unsigned APK for inspection
+        working-directory: android
+        run: ./gradlew assembleRelease
+      - name: Inspect final APK permissions
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release-unsigned.apk
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+          "$AAPT" dump permissions "$APK" | tee apk-permissions.txt
+          if grep -Eq 'SYSTEM_ALERT_WINDOW|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE' apk-permissions.txt; then
+            echo 'Unexpected permission in private APK'
+            exit 1
+          fi
+          sha256sum "$APK" > apk-sha256.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: private-unsigned-review-${{ github.sha }}
+          path: |
+            android/app/build/outputs/apk/release/app-release-unsigned.apk
+            apk-permissions.txt
+            apk-sha256.txt
+          if-no-files-found: error

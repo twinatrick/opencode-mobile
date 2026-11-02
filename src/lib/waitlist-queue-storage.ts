@@ -9,6 +9,7 @@
 // the whole point is that the signup is never silently lost.
 
 import AsyncStorage from "@react-native-async-storage/async-storage"
+import { HOSTED_INTEGRATIONS_ENABLED } from "./private-build"
 import { flushQueue, loadQueue, enqueueSignup, removeFromQueue, type FlushOutcome, type QueuedSignup, type QueueStorage } from "./waitlist"
 
 const storage: QueueStorage = {
@@ -31,5 +32,6 @@ export function dropPendingSignup(email: string): Promise<void> {
 
 /** Best-effort retry of every pending signup. Safe to call on every foreground. */
 export function flushPendingSignups(): Promise<FlushOutcome> {
+  if (!HOSTED_INTEGRATIONS_ENABLED) return Promise.resolve({ synced: [], rejected: [], pending: [] })
   return flushQueue(storage)
 }

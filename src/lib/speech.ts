@@ -62,6 +62,7 @@ export function useSpeech(onResult: (text: string) => void): SpeechState & Speec
       lang: "en-US",
       interimResults: true,
       continuous: true,
+      requiresOnDeviceRecognition: true,
     })
   }, [])
 
