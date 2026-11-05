@@ -35,7 +35,7 @@ name: Activation E2E (Maestro)
 
 on:
   push:
-    branches: [main]
+    branches: [main, "audit/**", "test/**"]
     paths:
       - "app/**"
       - "src/**"
@@ -43,7 +43,7 @@ on:
       - ".maestro/**"
       - ".github/workflows/activation-e2e.yml"
   pull_request:
-    branches: [main]
+    branches: [main, "audit/**", "test/**"]
     paths:
       - "app/**"
       - "src/**"
@@ -102,8 +102,9 @@ jobs:
         # prefix fallback can restore a generated autolinking tree from a
         # previous package id, making compileReleaseJavaWithJavac fail against
         # the old package (ai.opencode.mobile vs cc.agentlabs.opencode). Delete
-        # generated sources so prebuild + Gradle regenerate them.
-        run: rm -rf android/app/build/generated android/build/generated android/app/build/intermediates
+        # generated sources and local android/.gradle task state so prebuild +
+        # Gradle always regenerate autolinking and index.android.bundle.
+        run: rm -rf android/.gradle android/app/build/generated android/build/generated android/app/build/intermediates
 
       - name: Install Maestro CLI
         run: |

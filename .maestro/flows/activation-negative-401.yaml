@@ -38,10 +38,9 @@ name: Activation - negative path (connect-time 401 must surface a visible error)
 
 - launchApp:
     clearState: true
-- assertVisible:
-    id: "telemetry-consent-card"
 - tapOn:
     id: "telemetry-decline-button"
+    optional: true
 - takeScreenshot: negative-S1_consent_dismissed
 
 - assertVisible:

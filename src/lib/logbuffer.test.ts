@@ -85,3 +85,14 @@ test("formatLogLines renders ISO time, padded level, tag, and message", () => {
 test("formatLogLines of an empty list is an empty string", () => {
   assert.equal(formatLogLines([]), "")
 })
+
+test("scrubs Basic Auth tokens and URL credentials before storing in ring buffer", () => {
+  clearLog()
+  log.info("auth", "Connecting with Authorization: Basic dXNlcjpzZWNyZXQ= to http://opencode:mysecret@100.64.0.1:4096?token=topsecret")
+  const entry = getLogEntries()[0]
+  assert.ok(!entry.message.includes("dXNlcjpzZWNyZXQ="))
+  assert.ok(!entry.message.includes("mysecret"))
+  assert.ok(!entry.message.includes("topsecret"))
+  assert.ok(entry.message.includes("Basic <redacted>"))
+  assert.ok(entry.message.includes("//<redacted>@"))
+})

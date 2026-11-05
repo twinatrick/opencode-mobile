@@ -1,3 +1,4 @@
+import { scrubString } from "./scrub.ts"
 // In-memory ring buffer of recent log lines, for attaching to diagnostic reports.
 // Also mirrors to console so logs still show in Metro / logcat.
 
@@ -14,7 +15,7 @@ const MAX_ENTRIES = 200
 const buffer: LogEntry[] = []
 
 function push(level: LogLevel, tag: string, parts: unknown[]) {
-  const message = parts
+  const rawMessage = parts
     .map((p) => {
       if (typeof p === "string") return p
       try {
@@ -24,6 +25,7 @@ function push(level: LogLevel, tag: string, parts: unknown[]) {
       }
     })
     .join(" ")
+  const message = scrubString(rawMessage)
   buffer.push({ ts: Date.now(), level, tag, message })
   if (buffer.length > MAX_ENTRIES) buffer.shift()
 

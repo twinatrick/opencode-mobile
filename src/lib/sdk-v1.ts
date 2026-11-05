@@ -195,6 +195,15 @@ export class ApiError extends Error {
   }
 }
 
+const SAFE_RESOURCE_ID_RE = /^[A-Za-z0-9._:-]{1,256}$/
+
+function encodePathSegment(id: string, label: string = "id"): string {
+  if (typeof id !== "string" || !SAFE_RESOURCE_ID_RE.test(id) || id === "." || id === "..") {
+    throw new Error(`Invalid ${label}: path traversal or unsafe characters rejected`)
+  }
+  return encodeURIComponent(id)
+}
+
 function createHeaders(config: ClientConfig): HeadersInit {
   return buildRequestHeaders(config)
 }
@@ -379,7 +388,7 @@ export function createV1Client(config: ClientConfig) {
           params,
         ),
 
-      get: (sessionID: string) => request<Session>(config, `/session/${sessionID}`),
+      get: (sessionID: string) => request<Session>(config, `/session/${encodePathSegment(sessionID, "sessionID")}`),
 
       create: (params?: { title?: string }) =>
         request<Session>(config, "/session", {
@@ -387,10 +396,10 @@ export function createV1Client(config: ClientConfig) {
           body: JSON.stringify(params || {}),
         }),
 
-      delete: (sessionID: string) => request<void>(config, `/session/${sessionID}`, { method: "DELETE" }),
+      delete: (sessionID: string) => request<void>(config, `/session/${encodePathSegment(sessionID, "sessionID")}`, { method: "DELETE" }),
 
       update: (sessionID: string, params: { title?: string; time?: { archived?: number } }) =>
-        request<Session>(config, `/session/${sessionID}`, {
+        request<Session>(config, `/session/${encodePathSegment(sessionID, "sessionID")}`, {
           method: "PATCH",
           body: JSON.stringify(params),
         }),
@@ -399,7 +408,7 @@ export function createV1Client(config: ClientConfig) {
         const query = new URLSearchParams()
         if (params?.limit) query.set("limit", String(params.limit))
         const qs = query.toString()
-        return request<MessageWithParts[]>(config, `/session/${sessionID}/message${qs ? `?${qs}` : ""}`)
+        return request<MessageWithParts[]>(config, `/session/${encodePathSegment(sessionID, "sessionID")}/message${qs ? `?${qs}` : ""}`)
       },
 
       // Sends a message and returns the response
@@ -454,24 +463,24 @@ export function createV1Client(config: ClientConfig) {
         }
       },
 
-      abort: (sessionID: string) => request<boolean>(config, `/session/${sessionID}/abort`, { method: "POST" }),
+      abort: (sessionID: string) => request<boolean>(config, `/session/${encodePathSegment(sessionID, "sessionID")}/abort`, { method: "POST" }),
 
       diff: (sessionID: string, messageID?: string) => {
-        const qs = messageID ? `?messageID=${messageID}` : ""
-        return request<unknown[]>(config, `/session/${sessionID}/diff${qs}`)
+        const qs = messageID ? `?messageID=${encodePathSegment(messageID, "messageID")}` : ""
+        return request<unknown[]>(config, `/session/${encodePathSegment(sessionID, "sessionID")}/diff${qs}`)
       },
 
       // Marks messageID (and everything after it) as pending revert. The
       // underlying messages aren't deleted until the next prompt runs
       // cleanup, or the revert is undone with unrevert() below.
       revert: (sessionID: string, messageID: string, partID?: string) =>
-        request<Session>(config, `/session/${sessionID}/revert`, {
+        request<Session>(config, `/session/${encodePathSegment(sessionID, "sessionID")}/revert`, {
           method: "POST",
           body: JSON.stringify(partID ? { messageID, partID } : { messageID }),
         }),
 
       unrevert: (sessionID: string) =>
-        request<Session>(config, `/session/${sessionID}/unrevert`, {
+        request<Session>(config, `/session/${encodePathSegment(sessionID, "sessionID")}/unrevert`, {
           method: "POST",
         }),
     },
@@ -481,7 +490,7 @@ export function createV1Client(config: ClientConfig) {
         request<Array<{ id: string; sessionID: string; tool: string; input: unknown }>>(config, "/permission"),
 
       reply: (requestID: string, reply: "once" | "always" | "reject") =>
-        request<boolean>(config, `/permission/${requestID}/reply`, {
+        request<boolean>(config, `/permission/${encodePathSegment(requestID, "requestID")}/reply`, {
           method: "POST",
           body: JSON.stringify({ reply }),
         }),
@@ -491,13 +500,13 @@ export function createV1Client(config: ClientConfig) {
       list: () => request<Array<{ id: string; sessionID: string; questions: unknown[] }>>(config, "/question"),
 
       reply: (requestID: string, answers: string[][]) =>
-        request<boolean>(config, `/question/${requestID}/reply`, {
+        request<boolean>(config, `/question/${encodePathSegment(requestID, "requestID")}/reply`, {
           method: "POST",
           body: JSON.stringify({ answers }),
         }),
 
       reject: (requestID: string) =>
-        request<boolean>(config, `/question/${requestID}/reject`, {
+        request<boolean>(config, `/question/${encodePathSegment(requestID, "requestID")}/reject`, {
           method: "POST",
         }),
     },

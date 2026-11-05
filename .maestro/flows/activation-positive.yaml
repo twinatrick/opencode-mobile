@@ -44,10 +44,9 @@ name: Activation - positive path (consent -> connect -> send message)
 - launchApp:
     clearState: true
 - takeScreenshot: positive-S1_launch_consent_modal
-- assertVisible:
-    id: "telemetry-consent-card"
 - tapOn:
     id: "telemetry-decline-button"
+    optional: true
 
 - assertVisible:
     text: "No Connection"

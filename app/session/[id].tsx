@@ -67,6 +67,11 @@ const BUILTIN_COMMANDS: SlashCommand[] = [
   },
 ]
 
+const SAFE_ROUTE_ID_RE = /^[A-Za-z0-9._:-]{1,256}$/
+function isSafeRouteId(value: unknown): value is string {
+  return typeof value === "string" && SAFE_ROUTE_ID_RE.test(value) && value !== "." && value !== ".."
+}
+
 function getShortDir(dir?: string): string | null {
   if (!dir) return null
   const parts = dir.split("/").filter(Boolean)
@@ -292,12 +297,13 @@ export default function SessionScreen() {
   // to its own session whenever it becomes visible again.
   useFocusEffect(
     useCallback(() => {
-      if (!id) return
-      selectSession(id, directory).then(() => {
+      if (!isSafeRouteId(id)) return
+      const safeDir = typeof directory === "string" && !directory.includes("\0") ? directory : undefined
+      selectSession(id, safeDir).then(() => {
         // Re-fetch pending permissions/questions from the server to recover from
         // missed SSE events or failed optimistic removals
         const connState = useConnections.getState()
-        const c = directory ? (connState.clientForDirectory(directory) ?? connState.client) : connState.client
+        const c = safeDir ? (connState.clientForDirectory(safeDir) ?? connState.client) : connState.client
         if (c) refreshPending(c, id)
       })
     }, [id, directory]),

@@ -2,10 +2,10 @@ name: Build Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, "audit/**", "test/**"]
     tags: ["v*"]
   pull_request:
-    branches: [main]
+    branches: [main, "audit/**", "test/**"]
 
 jobs:
   test:

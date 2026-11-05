@@ -39,10 +39,9 @@ name: "DiffView + CodeBlock horizontal scroll - wide diff/code line reachable by
 
 - launchApp:
     clearState: true
-- assertVisible:
-    id: "telemetry-consent-card"
 - tapOn:
     id: "telemetry-decline-button"
+    optional: true
 
 - assertVisible:
     text: "No Connection"

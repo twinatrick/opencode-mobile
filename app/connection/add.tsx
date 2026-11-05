@@ -13,7 +13,8 @@ import {
   Alert,
   Linking,
 } from "react-native"
-import { router } from "expo-router"
+import { router, useLocalSearchParams } from "expo-router"
+import * as Clipboard from "expo-clipboard"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
 import { useConnections } from "../../src/stores/connections"
@@ -22,6 +23,14 @@ import { probeConnection, shareReport } from "../../src/lib/diagnostics"
 import { captureDiagnostic } from "../../src/lib/sentry"
 import { parseUrl } from "../../src/lib/diagnostics-classify"
 import { buildAuth } from "../../src/lib/auth"
+import { assessConnectionSecurity } from "../../src/lib/connection-security"
+import {
+  parsePairingInput,
+  parsePairingSearchParams,
+  redeemPairingToken,
+  type ParsedQrPairing,
+  type PendingRedeemQrPairing,
+} from "../../src/lib/qr-pairing"
 import { AnalyticsEvent, track } from "../../src/lib/analytics"
 import { submitWaitlistSignup, buildWaitlistMailtoUrl, needsManualEscapeHatch, type QueuedSignup } from "../../src/lib/waitlist"
 import { HOSTED_INTEGRATIONS_ENABLED } from "../../src/lib/private-build"
@@ -32,10 +41,54 @@ import appJson from "../../app.json"
 // version (package.json/gradle are kept in parity by `npm run check:versions`).
 const APP_VERSION = (appJson as { expo?: { version?: string } }).expo?.version ?? "unknown"
 
+async function confirmConnectionSecurity(url: string, password?: string): Promise<boolean> {
+  const assessment = assessConnectionSecurity(url, password)
+  if (assessment.isLoopbackOrEmulator) {
+    return true
+  }
+  if (!assessment.requiresCleartextWarning && !assessment.requiresEmptyPasswordWarning) {
+    return true
+  }
+
+  const warnings: string[] = []
+  if (assessment.requiresCleartextWarning) {
+    warnings.push(
+      "• Cleartext HTTP: This address is not using HTTPS, a Tailscale domain (*.ts.net), or a Tailscale CGNAT IP (100.64.0.0/10). Traffic and credentials may be exposed on untrusted networks.",
+    )
+  }
+  if (assessment.requiresEmptyPasswordWarning) {
+    warnings.push(
+      "• No Server Password: Connecting without a Basic Auth password leaves the session unauthenticated.",
+    )
+  }
+
+  return new Promise((resolve) => {
+    Alert.alert(
+      "Connection Security Warning",
+      `${warnings.join("\n\n")}\n\nDo you still want to proceed?`,
+      [
+        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+        { text: "Proceed Anyway", style: "destructive", onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    )
+  })
+}
+
 export default function AddConnectionScreen() {
   const colorScheme = useColorScheme()
   const isDark = colorScheme === "dark"
   const { t } = useTranslation()
+  const params = useLocalSearchParams<{
+    pairing?: string | string[]
+    enc?: string | string[]
+    pin?: string | string[]
+    payload?: string | string[]
+    url?: string | string[]
+    name?: string | string[]
+    user?: string | string[]
+    pw?: string | string[]
+  }>()
 
   const { addConnection, testConnection } = useConnections()
 
@@ -54,6 +107,91 @@ export default function AddConnectionScreen() {
   // be retried on the next foreground/connectivity (AGE-87). It is NOT "sent".
   const [waitlistState, setWaitlistState] = useState<"idle" | "submitting" | "joined" | "queued">("idle")
   const [pendingSignup, setPendingSignup] = useState<QueuedSignup | null>(null)
+  const [qrBanner, setQrBanner] = useState<ParsedQrPairing | null>(null)
+  const [qrError, setQrError] = useState<string | null>(null)
+  const [pendingRedeemQr, setPendingRedeemQr] = useState<PendingRedeemQrPairing | null>(null)
+
+  const applyPairingConfig = (config: ParsedQrPairing) => {
+    setQrError(null)
+    setPendingRedeemQr(null)
+    setQrBanner(config)
+    setName(config.payload.name || "")
+    setUrl(config.payload.url)
+    setIp(config.payload.url)
+    try {
+      const parsedUrl = new URL(config.payload.url)
+      if (parsedUrl.port) {
+        setPort(parsedUrl.port)
+      }
+    } catch {
+      // keep default port
+    }
+    if (config.payload.username) {
+      setUsername(config.payload.username)
+    }
+    if (config.payload.password !== undefined) {
+      setPassword(config.payload.password)
+    }
+  }
+
+  useEffect(() => {
+    const parsed = parsePairingSearchParams(params)
+    if (!parsed) return
+    if (parsed.ok && parsed.state === "redeemed") {
+      applyPairingConfig(parsed)
+      return
+    }
+    if (parsed.ok && parsed.state === "pending_redeem") {
+      setQrError(null)
+      setQrBanner(null)
+      setPendingRedeemQr(parsed)
+      setName(parsed.invitation.name)
+      setUrl(parsed.invitation.url)
+      setIp(parsed.invitation.url)
+      return
+    }
+    if (!parsed.ok) {
+      setQrBanner(null)
+      setPendingRedeemQr(null)
+      setQrError(parsed.error)
+    }
+  }, [params?.pairing, params?.enc, params?.pin, params?.payload, params?.url, params?.name, params?.user, params?.pw])
+
+  const handleRedeemPairingToken = async () => {
+    if (!pendingRedeemQr) return
+    const redeemed = await redeemPairingToken(pendingRedeemQr.invitation)
+    if (!redeemed.ok) {
+      setQrError(redeemed.error || "Failed to redeem one-time pairing token.")
+      return
+    }
+    if (redeemed.state === "redeemed") {
+      applyPairingConfig(redeemed)
+    }
+  }
+
+  const handlePastePairingLink = async () => {
+    const raw = await Clipboard.getStringAsync()
+    const parsed = parsePairingInput(raw)
+    if (parsed.ok && parsed.state === "redeemed") {
+      await Clipboard.setStringAsync("")
+      applyPairingConfig(parsed)
+      return
+    }
+    if (parsed.ok && parsed.state === "pending_redeem") {
+      await Clipboard.setStringAsync("")
+      setQrError(null)
+      setQrBanner(null)
+      setPendingRedeemQr(parsed)
+      setName(parsed.invitation.name)
+      setUrl(parsed.invitation.url)
+      setIp(parsed.invitation.url)
+      return
+    }
+    if (!parsed.ok) {
+      setQrBanner(null)
+      setQrError(parsed.error || "Clipboard does not contain a valid opencode:// pairing link.")
+    }
+  }
 
   // Retry anything left over from a previous session as soon as this screen
   // opens (the root layout also flushes on every foreground), then reflect the
@@ -109,14 +247,12 @@ export default function AddConnectionScreen() {
       return
     }
 
+    const confirmed = await confirmConnectionSecurity(serverUrl, password || undefined)
+    if (!confirmed) return
+
     track(AnalyticsEvent.ConnectionFormSubmitted, { mode: "quick" })
     setIsConnecting(true)
 
-    // Test connection first. Quick Connect has no username field, so the
-    // connection is intentionally saved without one — buildAuth() defaults
-    // it to "opencode" wherever auth is built. Sending the `username` state
-    // here would leak a value typed earlier in Advanced mode (issue: Back to
-    // Quick silently overriding the default).
     const result = await testConnection(
       {
         id: "",
@@ -129,15 +265,12 @@ export default function AddConnectionScreen() {
     )
 
     if (result.ok) {
-      // Save and go back
       try {
         await addConnection(
           {
             name: name.trim() || t("connection.shared.namePlaceholder"),
             type: "local",
             url: serverUrl,
-            // Carry the transport the pre-flight probe already determined, so the
-            // save does not probe the same server a second time.
             api: result.api,
             serverVersion: result.serverVersion,
           },
@@ -153,7 +286,6 @@ export default function AddConnectionScreen() {
         )
       }
     } else {
-      // Failed: run active diagnostics, capture to Sentry, offer a shareable report.
       const report = await probeConnection(serverUrl, buildAuth(undefined, password))
       captureDiagnostic(report)
       setIsConnecting(false)
@@ -186,14 +318,12 @@ export default function AddConnectionScreen() {
       return
     }
 
+    const confirmed = await confirmConnectionSecurity(url.trim(), password || undefined)
+    if (!confirmed) return
+
     track(AnalyticsEvent.ConnectionFormSubmitted, { mode: "advanced" })
     setIsConnecting(true)
 
-    // Pre-flight, mirroring Quick Connect: previously Advanced mode saved
-    // directly with no health check, so bad credentials (401/403) or an
-    // unreachable server silently became the active connection with zero
-    // feedback (issue #76). testConnection() also fires the
-    // connection_attempted/succeeded/failed analytics events.
     const result = await testConnection(
       {
         id: "",
@@ -233,9 +363,6 @@ export default function AddConnectionScreen() {
       return
     }
 
-    // Failed: same "Connection Failed" alert as Quick Connect — run active
-    // diagnostics, capture to Sentry, and offer a shareable report instead of
-    // silently persisting an unreachable/unauthorized connection.
     const report = await probeConnection(url.trim(), buildAuth(username, password))
     captureDiagnostic(report)
     setIsConnecting(false)
@@ -260,8 +387,6 @@ export default function AddConnectionScreen() {
     setWaitlistState("submitting")
     const result = await submitWaitlistSignup(attemptedEmail)
     if (result.ok) {
-      // Clear any earlier queued attempt for the same address so the flush
-      // doesn't re-post it.
       void dropPendingSignup(result.email)
       setPendingSignup(null)
       setWaitlistState("joined")
@@ -269,14 +394,11 @@ export default function AddConnectionScreen() {
     }
 
     if (!result.retryable) {
-      // The server rejected this address; queueing it would retry forever.
       setWaitlistState(pendingSignup ? "queued" : "idle")
       Alert.alert(t("connection.add.waitlist.alertTitle"), result.error)
       return
     }
 
-    // Offline / timeout / 5xx: persist and retry later instead of dumping the
-    // user into a mail composer they may never send (AGE-87).
     const entry = await queuePendingSignup(result.email, result.error)
     if (entry) {
       setPendingSignup(entry)
@@ -284,8 +406,6 @@ export default function AddConnectionScreen() {
       return
     }
 
-    // Storage refused the write — we cannot promise to finish this later, so
-    // offer the manual email path explicitly rather than claiming success.
     setWaitlistState("idle")
     Alert.alert(t("connection.add.waitlist.alertTitle"), t("connection.add.waitlist.queueFailedMessage"), [
       { text: t("common.cancel"), style: "cancel" },
@@ -293,7 +413,6 @@ export default function AddConnectionScreen() {
     ])
   }
 
-  // Last-resort, user-initiated only. Never opened automatically.
   const openWaitlistMailto = async (email: string) => {
     try {
       await Linking.openURL(buildWaitlistMailtoUrl(email, APP_VERSION))
@@ -302,25 +421,85 @@ export default function AddConnectionScreen() {
     }
   }
 
-  // Explicit "Retry" from the queued state — same code path the foreground
-  // flush uses, so there is only one retry implementation.
   const handleRetryQueued = async () => {
     setWaitlistState("submitting")
     const outcome = await flushPendingSignups().catch(() => null)
+    if (outcome && outcome.pending.length === 0 && outcome.synced.length === 0) {
+      setPendingSignup(null)
+      setWaitlistState("idle")
+      return
+    }
     if (outcome && outcome.pending.length === 0 && outcome.synced.length > 0) {
       setPendingSignup(null)
       setWaitlistState("joined")
       return
     }
-    if (outcome && outcome.pending.length === 0) {
-      // Nothing left pending and nothing synced: the address was rejected.
-      setPendingSignup(null)
-      setWaitlistState("idle")
-      return
-    }
     if (outcome) setPendingSignup(outcome.pending[outcome.pending.length - 1])
     setWaitlistState("queued")
   }
+
+  const renderQrPairingSection = () => (
+    <>
+      {pendingRedeemQr && (
+        <View style={[styles.qrBanner, isDark && styles.qrBannerDark]} testID="qr-pairing-pending-card">
+          <View style={styles.qrBannerHeader}>
+            <Ionicons name="shield-checkmark" size={20} color="#6366f1" />
+            <Text style={[styles.qrBannerTitle, isDark && styles.textDark]}>
+              One-Time Pairing Token Ready: {pendingRedeemQr.invitation.name}
+            </Text>
+          </View>
+          <Text style={styles.qrBannerBadge} testID="qr-pairing-pending-badge">
+            Transport: {pendingRedeemQr.invitation.securityLabel} •{" "}
+            {pendingRedeemQr.invitation.security.requiresCleartextWarning ? "Cleartext HTTP Warning" : "Authenticated Transport"}
+          </Text>
+          <Text style={[styles.qrBannerHint, isDark && styles.hintDark]}>
+            Target: {pendingRedeemQr.invitation.url}. Tap Redeem One-Time Token to exchange the 256-bit token with the server (valid for 5 minutes, single-use).
+          </Text>
+          <TouchableOpacity
+            style={styles.unlockButton}
+            onPress={() => void handleRedeemPairingToken()}
+            testID="qr-pairing-redeem-button"
+          >
+            <Ionicons name="key-outline" size={16} color="#ffffff" />
+            <Text style={styles.unlockButtonText}>Redeem One-Time Token</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {qrBanner && (
+        <View style={[styles.qrBanner, isDark && styles.qrBannerDark]} testID="qr-pairing-banner">
+          <View style={styles.qrBannerHeader}>
+            <Ionicons name="qr-code-outline" size={20} color="#22c55e" />
+            <Text style={[styles.qrBannerTitle, isDark && styles.textDark]}>
+              One-Time Pairing Token Redeemed: {qrBanner.payload.name || "OpenCode Server"}
+            </Text>
+          </View>
+          <Text style={styles.qrBannerBadge} testID="qr-pairing-security-badge">
+            Transport: {qrBanner.payload.securityLabel} •{" "}
+            {qrBanner.payload.security.requiresCleartextWarning ? "Cleartext HTTP Warning" : "Authenticated Transport"}
+          </Text>
+          <Text style={[styles.qrBannerHint, isDark && styles.hintDark]}>
+            Review the pre-filled server URL and credentials below, then tap Connect to confirm.
+          </Text>
+        </View>
+      )}
+
+      {qrError && (
+        <View style={[styles.qrErrorBox, isDark && styles.qrErrorBoxDark]} testID="qr-pairing-error">
+          <Text style={styles.qrErrorText}>{qrError}</Text>
+        </View>
+      )}
+
+      <TouchableOpacity
+        style={[styles.pastePairingButton, isDark && styles.pastePairingButtonDark]}
+        onPress={() => void handlePastePairingLink()}
+        testID="paste-pairing-button"
+      >
+        <Ionicons name="clipboard-outline" size={16} color="#6366f1" />
+        <Text style={styles.pastePairingButtonText}>Paste QR Pairing Link (opencode://)</Text>
+      </TouchableOpacity>
+    </>
+  )
 
   // Quick connect mode - simplified
   if (mode === "quick") {
@@ -340,6 +519,8 @@ export default function AddConnectionScreen() {
           <Text style={[styles.quickTitle, isDark && styles.textDark]}>{t("connection.add.quick.title")}</Text>
           <Text style={[styles.quickSubtitle, isDark && styles.hintDark]}>{t("connection.add.quick.subtitle")}</Text>
         </View>
+
+        {renderQrPairingSection()}
 
         {/* IP Address */}
         <Text style={[styles.label, isDark && styles.labelDark]}>{t("connection.add.quick.ipAddressLabel")}</Text>
@@ -552,6 +733,8 @@ export default function AddConnectionScreen() {
         <Text style={[styles.backToQuickText, isDark && styles.hintDark]}>{t("connection.add.advanced.backToQuick")}</Text>
       </TouchableOpacity>
 
+      {renderQrPairingSection()}
+
       {/* Connection Type */}
       <Text style={[styles.label, isDark && styles.labelDark]}>{t("connection.shared.connectionType")}</Text>
       <View style={styles.typeContainer}>
@@ -712,6 +895,99 @@ const styles = StyleSheet.create({
     color: "#666666",
     marginTop: 8,
     textAlign: "center",
+  },
+  qrBanner: {
+    backgroundColor: "#f0fdf4",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#22c55e",
+  },
+  qrBannerDark: {
+    backgroundColor: "#052e16",
+    borderColor: "#16a34a",
+  },
+  qrBannerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 4,
+  },
+  qrBannerTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0a0a0a",
+  },
+  qrBannerBadge: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#15803d",
+    marginBottom: 4,
+  },
+  qrBannerHint: {
+    fontSize: 12,
+    color: "#666666",
+    lineHeight: 17,
+  },
+  pinInput: {
+    marginTop: 10,
+    letterSpacing: 3,
+    fontWeight: "700",
+  },
+  unlockButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 12,
+    paddingVertical: 11,
+    borderRadius: 10,
+    backgroundColor: "#6366f1",
+  },
+  unlockButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#ffffff",
+  },
+  qrErrorBox: {
+    backgroundColor: "#fef2f2",
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#ef4444",
+  },
+  qrErrorBoxDark: {
+    backgroundColor: "#450a0a",
+    borderColor: "#dc2626",
+  },
+  qrErrorText: {
+    fontSize: 12,
+    color: "#dc2626",
+    fontWeight: "600",
+  },
+  pastePairingButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: "#f5f5f5",
+    borderWidth: 1,
+    borderColor: "#e5e5e5",
+    marginBottom: 4,
+  },
+  pastePairingButtonDark: {
+    backgroundColor: "#1a1a1a",
+    borderColor: "#333333",
+  },
+  pastePairingButtonText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#6366f1",
   },
   ipRow: {
     flexDirection: "row",

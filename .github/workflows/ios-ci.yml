@@ -17,9 +17,9 @@ name: iOS CI
 # check satisfiable. See #143 (docs PR stuck) for why.
 on:
   pull_request:
-    branches: [main]
+    branches: [main, "audit/**", "test/**"]
   push:
-    branches: [main]
+    branches: [main, "audit/**", "test/**"]
 
 # Cancel superseded runs for the same ref (e.g. new push to an open PR).
 concurrency:

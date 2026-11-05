@@ -10,7 +10,9 @@
     "android": "expo run:android",
     "typecheck": "tsc --noEmit",
     "check:versions": "node scripts/check-version-parity.mjs",
-    "test": "node --test 'src/**/*.test.ts' 'scripts/*.test.mjs' 'plugins/*.test.js'"
+    "test": "node --test 'src/**/*.test.ts' 'scripts/*.test.mjs' 'plugins/*.test.js'",
+    "qr": "node scripts/opencode-qr.mjs",
+    "serve:qr": "node scripts/opencode-qr.mjs --serve"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

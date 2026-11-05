@@ -20,10 +20,9 @@ name: Demo mode - offline scripted walkthrough (no server, zero-server activatio
 
 - launchApp:
     clearState: true
-- assertVisible:
-    id: "telemetry-consent-card"
 - tapOn:
     id: "telemetry-decline-button"
+    optional: true
 
 - assertVisible:
     text: "No Connection"

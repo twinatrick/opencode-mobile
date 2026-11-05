@@ -229,6 +229,15 @@ export class ApiError extends Error {
   }
 }
 
+const SAFE_RESOURCE_ID_RE = /^[A-Za-z0-9._:-]{1,256}$/
+
+export function encodePathSegment(id: string, label: string = "id"): string {
+  if (typeof id !== "string" || !SAFE_RESOURCE_ID_RE.test(id) || id === "." || id === "..") {
+    throw new Error(`Invalid ${label}: path traversal or unsafe characters rejected`)
+  }
+  return encodeURIComponent(id)
+}
+
 function createHeaders(config: ClientConfig): HeadersInit {
   return buildRequestHeaders(config)
 }
@@ -343,7 +352,7 @@ function createV2Client(config: ClientConfig) {
   const loc = () => locationQuery(config.directory)
 
   const getSession = async (sessionID: string): Promise<Session> => {
-    const body = await request<{ data: V2SessionInfo }>(config, `/api/session/${sessionID}`)
+    const body = await request<{ data: V2SessionInfo }>(config, `/api/session/${encodePathSegment(sessionID, "sessionID")}`)
     return toSession(body.data)
   }
 
@@ -512,12 +521,12 @@ function createV2Client(config: ClientConfig) {
         return toSession(body.data)
       },
 
-      delete: (sessionID: string) => request<void>(config, `/api/session/${sessionID}`, { method: "DELETE" }),
+      delete: (sessionID: string) => request<void>(config, `/api/session/${encodePathSegment(sessionID, "sessionID")}`, { method: "DELETE" }),
 
       // PATCH only answers 204 on v2 — re-fetch so callers get the updated
       // Session like v1 did.
       update: async (sessionID: string, params: { title?: string; time?: { archived?: number } }): Promise<Session> => {
-        await request<void>(config, `/api/session/${sessionID}`, {
+        await request<void>(config, `/api/session/${encodePathSegment(sessionID, "sessionID")}`, {
           method: "PATCH",
           body: JSON.stringify({ title: params.title }),
         })
@@ -531,7 +540,7 @@ function createV2Client(config: ClientConfig) {
         if (params?.limit) {
           const body = await request<{ data: V2Message[] }>(
             config,
-            `/api/session/${sessionID}/message?order=desc&limit=${params.limit}`,
+            `/api/session/${encodePathSegment(sessionID, "sessionID")}/message?order=desc&limit=${params.limit}`,
           )
           return toMessageWithParts(body.data || []).reverse()
         }
@@ -542,7 +551,7 @@ function createV2Client(config: ClientConfig) {
           const qs: string = cursor ? `cursor=${encodeURIComponent(cursor)}` : "order=desc"
           const body: { data: V2Message[]; cursor?: { next?: string | null } } = await request<{ data: V2Message[]; cursor?: { next?: string | null } }>(
             config,
-            `/api/session/${sessionID}/message?${qs}`,
+            `/api/session/${encodePathSegment(sessionID, "sessionID")}/message?${qs}`,
           )
           all.push(...(body.data || []))
           cursor = body.cursor?.next ?? null
@@ -566,7 +575,7 @@ function createV2Client(config: ClientConfig) {
         },
       ): Promise<void> => {
         if (params.model) {
-          await request<void>(config, `/api/session/${sessionID}/model`, {
+          await request<void>(config, `/api/session/${encodePathSegment(sessionID, "sessionID")}/model`, {
             method: "POST",
             body: JSON.stringify({
               model: {
@@ -578,7 +587,7 @@ function createV2Client(config: ClientConfig) {
           })
         }
         if (params.agent) {
-          await request<void>(config, `/api/session/${sessionID}/agent`, {
+          await request<void>(config, `/api/session/${encodePathSegment(sessionID, "sessionID")}/agent`, {
             method: "POST",
             body: JSON.stringify({ agent: params.agent }),
           })
@@ -590,7 +599,7 @@ function createV2Client(config: ClientConfig) {
         const files = params.parts
           .filter((p): p is { type: "file"; mime: string; url: string; filename?: string } => p.type === "file")
           .map((p) => ({ uri: p.url, ...(p.filename ? { name: p.filename } : {}) }))
-        await request(config, `/api/session/${sessionID}/prompt`, {
+        await request(config, `/api/session/${encodePathSegment(sessionID, "sessionID")}/prompt`, {
           method: "POST",
           body: JSON.stringify({ text, files }),
         })
@@ -607,7 +616,7 @@ function createV2Client(config: ClientConfig) {
           parts?: Array<{ type: "file"; mime: string; url: string; filename?: string }>
         },
       ): Promise<void> => {
-        await request(config, `/api/session/${sessionID}/command`, {
+        await request(config, `/api/session/${encodePathSegment(sessionID, "sessionID")}/command`, {
           method: "POST",
           body: JSON.stringify({
             name: params.command,
@@ -619,7 +628,7 @@ function createV2Client(config: ClientConfig) {
 
       // v2 replaces abort with interrupt (POST returns {interrupted}).
       abort: async (sessionID: string): Promise<boolean> => {
-        const body = await request<{ interrupted?: boolean }>(config, `/api/session/${sessionID}/interrupt`, {
+        const body = await request<{ interrupted?: boolean }>(config, `/api/session/${encodePathSegment(sessionID, "sessionID")}/interrupt`, {
           method: "POST",
         })
         return Boolean(body.interrupted)
@@ -628,7 +637,7 @@ function createV2Client(config: ClientConfig) {
       // v2 diff is turn-based (from/to), no messageID scoping needed —
       // callers get the session's structured per-file diffs.
       diff: async (sessionID: string): Promise<unknown[]> => {
-        const body = await request<{ data: unknown[] }>(config, `/api/session/${sessionID}/diff`)
+        const body = await request<{ data: unknown[] }>(config, `/api/session/${encodePathSegment(sessionID, "sessionID")}/diff`)
         return body.data || []
       },
 
@@ -637,7 +646,7 @@ function createV2Client(config: ClientConfig) {
       // unrevert() below discards it. The stage endpoint answers with the
       // boundary itself, so re-fetch the session for its updated `revert`.
       revert: async (sessionID: string, messageID: string): Promise<Session> => {
-        await request(config, `/api/session/${sessionID}/revert/stage`, {
+        await request(config, `/api/session/${encodePathSegment(sessionID, "sessionID")}/revert/stage`, {
           method: "POST",
           body: JSON.stringify({ messageID }),
         })
@@ -645,7 +654,7 @@ function createV2Client(config: ClientConfig) {
       },
 
       unrevert: async (sessionID: string): Promise<Session> => {
-        await request<void>(config, `/api/session/${sessionID}/revert`, { method: "DELETE" })
+        await request<void>(config, `/api/session/${encodePathSegment(sessionID, "sessionID")}/revert`, { method: "DELETE" })
         return getSession(sessionID)
       },
     },
@@ -655,7 +664,7 @@ function createV2Client(config: ClientConfig) {
       // the session it's refreshing, so prefer the session endpoint and only
       // hit the location-global one as a fallback.
       list: async (sessionID?: string) => {
-        const path = sessionID ? `/api/session/${sessionID}/permission` : appendQuery("/api/permission/request", loc())
+        const path = sessionID ? `/api/session/${encodePathSegment(sessionID, "sessionID")}/permission` : appendQuery("/api/permission/request", loc())
         const body = await request<{ data: V2PermissionRequest[] }>(config, path)
         const out = (body.data || []).map((p) => {
           rememberPermissionRequest(p)
@@ -667,7 +676,7 @@ function createV2Client(config: ClientConfig) {
       reply: async (requestID: string, reply: "once" | "always" | "reject"): Promise<boolean> => {
         const known = pendingRequestInfo(requestID)
         if (!known) throw new Error(`Unknown permission request: ${requestID}`)
-        await request<void>(config, `/api/session/${known.sessionID}/permission/${requestID}/reply`, {
+        await request<void>(config, `/api/session/${encodePathSegment(known.sessionID, "sessionID")}/permission/${encodePathSegment(requestID, "requestID")}/reply`, {
           method: "POST",
           body: JSON.stringify({ decision: reply }),
         })
@@ -678,7 +687,7 @@ function createV2Client(config: ClientConfig) {
     question: {
       // v2 calls these "forms"; they map 1:1 onto the app's question prompts.
       list: async (sessionID?: string) => {
-        const path = sessionID ? `/api/session/${sessionID}/form` : appendQuery("/api/form", loc())
+        const path = sessionID ? `/api/session/${encodePathSegment(sessionID, "sessionID")}/form` : appendQuery("/api/form", loc())
         const body = await request<{ data: V2FormInfo[] }>(config, path)
         const out = (body.data || []).map((f) => {
           rememberForm(f)
@@ -690,7 +699,7 @@ function createV2Client(config: ClientConfig) {
       reply: async (requestID: string, answers: string[][]): Promise<boolean> => {
         const known = pendingRequestInfo(requestID)
         if (!known) throw new Error(`Unknown question request: ${requestID}`)
-        await request<void>(config, `/api/session/${known.sessionID}/form/${requestID}/reply`, {
+        await request<void>(config, `/api/session/${encodePathSegment(known.sessionID, "sessionID")}/form/${encodePathSegment(requestID, "requestID")}/reply`, {
           method: "POST",
           body: JSON.stringify({ answer: formAnswerFromFields(known.fields, answers) }),
         })
@@ -700,7 +709,7 @@ function createV2Client(config: ClientConfig) {
       reject: async (requestID: string): Promise<boolean> => {
         const known = pendingRequestInfo(requestID)
         if (!known) throw new Error(`Unknown question request: ${requestID}`)
-        await request<void>(config, `/api/session/${known.sessionID}/form/${requestID}`, { method: "DELETE" })
+        await request<void>(config, `/api/session/${encodePathSegment(known.sessionID, "sessionID")}/form/${encodePathSegment(requestID, "requestID")}`, { method: "DELETE" })
         return true
       },
     },

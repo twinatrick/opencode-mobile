@@ -36,6 +36,11 @@ const CONNECTION_TYPES: Array<{
   { type: "cloud", labelKey: "connection.shared.types.cloud", icon: "cloud" },
 ]
 
+const SAFE_ROUTE_ID_RE = /^[A-Za-z0-9._:-]{1,256}$/
+function isSafeRouteId(value: unknown): value is string {
+  return typeof value === "string" && SAFE_ROUTE_ID_RE.test(value) && value !== "." && value !== ".."
+}
+
 export default function EditConnectionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const colorScheme = useColorScheme()
@@ -44,7 +49,7 @@ export default function EditConnectionScreen() {
 
   const { connections, updateConnection, removeConnection, testConnection } = useConnections()
 
-  const connection = connections.find((c) => c.id === id)
+  const connection = isSafeRouteId(id) ? connections.find((c) => c.id === id) : undefined
 
   const [type, setType] = useState<ConnectionType>(connection?.type || "local")
   const [name, setName] = useState(connection?.name || "")

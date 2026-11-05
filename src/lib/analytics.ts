@@ -23,7 +23,7 @@
 // PostHogProvider / autocapture) so the app controls exactly what is sent —
 // same "explicit event, no magic" posture as sentry.ts.
 
-import PostHog from "posthog-react-native"
+// posthog-react-native runtime import removed in hardened private build
 import { HOSTED_INTEGRATIONS_ENABLED } from "./private-build"
 import * as SecureStore from "expo-secure-store"
 import { log } from "./logbuffer"
@@ -46,20 +46,13 @@ let dropNetwork = false
  *  request short-circuits to a fake success so nothing reaches the network.
  *  (Types derived from the base class to avoid importing the transitive
  *  @posthog/core package directly.) */
-class ConsentGatedPostHog extends PostHog {
-  fetch(url: string, options: Parameters<PostHog["fetch"]>[1]): ReturnType<PostHog["fetch"]> {
-    if (dropNetwork) {
-      return Promise.resolve({
-        status: 200,
-        text: async () => "",
-        json: async () => ({ status: 1 }),
-      })
-    }
-    return super.fetch(url, options)
-  }
+interface PostHogLike {
+  optIn(): Promise<void>
+  optOut(): Promise<void>
+  shutdown(): Promise<void>
+  capture(event: string, props?: Record<string, unknown>): void
 }
-
-let client: ConsentGatedPostHog | null = null
+let client: PostHogLike | null = null
 let enabled = false
 // app_opened must fire at most once per JS session, whichever path enables
 // analytics first (cold start with prior consent, or the consent modal /
@@ -115,14 +108,7 @@ export function initAnalytics() {
   }
   try {
     dropNetwork = false
-    client = new ConsentGatedPostHog(API_KEY, {
-      host: HOST,
-      // We call track() explicitly at each funnel step — no implicit capture.
-      captureAppLifecycleEvents: false,
-    })
-    // A previous revoke persisted the SDK-level opt-out flag; clear it so the
-    // re-granted client can enqueue again. No-op on a fresh install.
-    void client.optIn()
+    client = null
     enabled = true
     log.info("analytics", "initialized", `host=${HOST}`)
   } catch (e) {

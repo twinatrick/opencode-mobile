@@ -13,7 +13,14 @@
 //      loops, while genuine crashes pass through untouched. The decision logic
 //      lives in ./sentry-noise.ts so it is unit-testable without the RN SDK.
 
-import * as Sentry from "@sentry/react-native"
+import type React from "react"
+
+export type SeverityLevel = "fatal" | "error" | "warning" | "log" | "info" | "debug"
+export type SentryEvent = Parameters<typeof eventText>[0] & {
+  request?: { url?: string }
+  breadcrumbs?: Array<{ category?: string; message?: string; data?: Record<string, unknown> }>
+  tags?: Record<string, string>
+}
 import { HOSTED_INTEGRATIONS_ENABLED } from "./private-build"
 import appJson from "../../app.json"
 import { log } from "./logbuffer"
@@ -35,48 +42,6 @@ export function initSentry() {
   if (enabled) return
   if (!DSN) {
     log.info("sentry", "no DSN configured — telemetry disabled")
-    installGlobalHandlers()
-    return
-  }
-  try {
-    Sentry.init({
-      dsn: DSN,
-      release: `opencode-mobile@${APP_VERSION}`,
-      dist: APP_VERSION,
-      // Performance tracing off by default; only error + crash capture.
-      tracesSampleRate: 0,
-      enableAutoSessionTracking: true,
-      // Don't ship default PII (IP, cookies). We attach what we want explicitly.
-      sendDefaultPii: false,
-      // Auto-capture uncaught JS exceptions AND unhandled promise rejections.
-      // The SDK enables these by default but we keep them on explicitly so a
-      // future config refactor can't silently drop coverage.
-      enableNative: true,
-      enableNativeCrashHandling: true,
-      enableAutoPerformanceTracing: false,
-      attachStacktrace: true,
-      maxBreadcrumbs: 100,
-      // Final pre-send stage: drop non-actionable noise (AGE-105), then strip
-      // URLs everywhere they could appear.
-      beforeSend(event) {
-        const filtered = applyNoiseGate(event)
-        return filtered ? scrubEvent(filtered) : null
-      },
-      beforeBreadcrumb(crumb) {
-        // Console output can contain malformed server payloads, prompts, or code.
-        if (crumb.category === "console") return null
-        if (crumb.data && typeof crumb.data === "object") {
-          crumb.data = redactObject(crumb.data as Record<string, unknown>)
-        }
-        if (typeof crumb.message === "string") crumb.message = redactString(crumb.message)
-        return crumb
-      },
-    })
-    enabled = true
-    Sentry.setTag("app.version", APP_VERSION)
-    log.info("sentry", "initialized", `release=opencode-mobile@${APP_VERSION}`)
-  } catch (e) {
-    log.warn("sentry", "init failed", String(e))
   }
   installGlobalHandlers()
 }
@@ -84,7 +49,7 @@ export function initSentry() {
 export async function disableSentry() {
   if (!enabled) return
   enabled = false
-  await Sentry.close()
+  // no-op without native SDK
   log.info("sentry", "disabled by user")
 }
 
@@ -109,19 +74,10 @@ function installGlobalHandlers() {
     errorUtils.setGlobalHandler((err: unknown, isFatal?: boolean) => {
       const error = toError(err)
       log.error("crash", isFatal ? "FATAL" : "non-fatal", error.message, error.stack ?? "")
-      if (enabled) {
-        Sentry.captureException(error, (scope) => {
-          scope.setLevel(isFatal ? "fatal" : "error")
-          scope.setTag("crash.source", "js-global")
-          scope.setTag("crash.fatal", String(Boolean(isFatal)))
-          return scope
-        })
-      }
       previous?.(err, isFatal)
     })
   }
 
-  // Hermes/RN expose `onunhandledrejection` on the global object.
   type GlobalRejection = {
     onunhandledrejection?: (event: { reason?: unknown; promise?: unknown }) => void
   }
@@ -130,13 +86,6 @@ function installGlobalHandlers() {
   g.onunhandledrejection = (event) => {
     const error = toError(event?.reason)
     log.error("crash", "unhandled-rejection", error.message, error.stack ?? "")
-    if (enabled) {
-      Sentry.captureException(error, (scope) => {
-        scope.setLevel("error")
-        scope.setTag("crash.source", "promise-rejection")
-        return scope
-      })
-    }
     prevRej?.(event)
   }
 }
@@ -155,7 +104,7 @@ function toError(value: unknown): Error {
 
 /** Returns the event to send, or null to drop it. Exported for the RN-side
  *  integration test; the pure rules are tested in sentry-noise.test.ts. */
-export function applyNoiseGate<T extends Sentry.Event>(event: T): T | null {
+export function applyNoiseGate<T extends SentryEvent>(event: T): T | null {
   const text = eventText(event)
   const decision = noiseGate.admit(text, { fatal: isFatalEvent(event) })
   if (!decision.send) {
@@ -173,7 +122,7 @@ export function applyNoiseGate<T extends Sentry.Event>(event: T): T | null {
 
 export { scrubUrl } from "./scrub"
 
-function scrubEvent<T extends Sentry.Event>(event: T): T {
+function scrubEvent<T extends SentryEvent>(event: T): T {
   if (event.request?.url) event.request.url = "<redacted-url>"
   if (event.message) event.message = redactString(event.message)
   if (event.exception?.values) {
@@ -182,7 +131,7 @@ function scrubEvent<T extends Sentry.Event>(event: T): T {
     }
   }
   if (event.breadcrumbs) {
-    event.breadcrumbs = event.breadcrumbs.filter((crumb) => crumb.category !== "console")
+    event.breadcrumbs = event.breadcrumbs.filter((crumb: { category?: string }) => crumb.category !== "console")
     for (const crumb of event.breadcrumbs) {
       if (typeof crumb.message === "string") crumb.message = redactString(crumb.message)
       if (crumb.data && typeof crumb.data === "object") {
@@ -240,67 +189,27 @@ export type Breadcrumb = {
   data?: Record<string, unknown>
 }
 
-export function addBreadcrumb(crumb: Breadcrumb) {
+export function addBreadcrumb(_crumb: Breadcrumb) {
   if (!enabled) return
-  Sentry.addBreadcrumb({
-    category: crumb.category,
-    message: crumb.message,
-    level: crumb.level ?? "info",
-    data: crumb.data,
-    timestamp: Date.now() / 1000,
-  })
 }
 
 export function captureException(
   err: unknown,
-  context?: { tags?: Record<string, string>; extra?: Record<string, unknown>; level?: Sentry.SeverityLevel },
+  _context?: { tags?: Record<string, string>; extra?: Record<string, unknown>; level?: SeverityLevel },
 ) {
   const error = toError(err)
   log.error("sentry", "captureException", error.message)
-  if (!enabled) return
-  Sentry.withScope((scope) => {
-    if (context?.level) scope.setLevel(context.level)
-    if (context?.tags) for (const [k, v] of Object.entries(context.tags)) scope.setTag(k, v)
-    if (context?.extra) for (const [k, v] of Object.entries(context.extra)) scope.setExtra(k, v)
-    Sentry.captureException(error)
-  })
 }
 
 export function captureDiagnostic(report: DiagnosticReport) {
   log.info("sentry", "capture", report.classification, enabled ? "(uploading)" : "(local only)")
   if (!enabled) return
-  // Client-side network conditions (timeout / unreachable / no internet) and
-  // wrong credentials (auth-failed) are already shown to the user and already
-  // trended in PostHog as `connection_failed{error_class}`; they were the
-  // single largest consumer of the org Sentry quota (AGE-105 / AGE-107). Skip
-  // them here so we don't even build the event. `health-failed` / `tls-error`
-  // are genuinely actionable and still go.
   if (isTransportNoise(`connect ${report.classification}`)) {
     log.info("sentry", "skipped diagnostic upload (client-side network condition)", report.classification)
-    return
   }
-  Sentry.withScope((scope) => {
-    scope.setTag("connect.classification", report.classification)
-    scope.setTag("connect.scheme", report.scheme ?? "n/a")
-    scope.setContext("connection", {
-      targetType: report.isHostname ? "hostname" : "ip-address",
-    })
-    scope.setContext("probes", {
-      attempts: report.attempts.map((a) => ({
-        name: a.name,
-        ok: a.ok,
-        status: a.status,
-        durationMs: a.durationMs,
-      })),
-    })
-    scope.setContext("device", report.device)
-    Sentry.captureException(new Error(`connect ${report.classification}`))
-  })
 }
 
-// React error boundaries are implemented as our own class component
-// (see src/components/ErrorBoundary.tsx) so we can render a useful
-// "Share diagnostic" fallback. We still expose Sentry.wrap as `wrap`
-// for callers that just want auto-capture without a custom fallback.
-export const wrap = Sentry.wrap
+export function wrap<P extends Record<string, unknown>>(Component: React.ComponentType<P>): React.ComponentType<P> {
+  return Component
+}
 export const sentryEnabled = () => enabled

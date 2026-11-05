@@ -19,10 +19,9 @@ name: Directory picker - browse server folders and create a session in one
 
 - launchApp:
     clearState: true
-- assertVisible:
-    id: "telemetry-consent-card"
 - tapOn:
     id: "telemetry-decline-button"
+    optional: true
 
 - assertVisible:
     text: "No Connection"

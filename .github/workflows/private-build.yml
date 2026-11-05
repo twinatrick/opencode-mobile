@@ -52,7 +52,7 @@ jobs:
           APK=android/app/build/outputs/apk/release/app-release-unsigned.apk
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
           "$AAPT" dump permissions "$APK" | tee apk-permissions.txt
-          if grep -Eq 'SYSTEM_ALERT_WINDOW|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE' apk-permissions.txt; then
+          if grep -Eq 'SYSTEM_ALERT_WINDOW|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|CAMERA|RECEIVE_BOOT_COMPLETED|FOREGROUND_SERVICE_MICROPHONE|android\.permission\.CAMERA|RECEIVE_BOOT_COMPLETED|c2dm\.permission\.RECEIVE|BIND_GET_INSTALL_REFERRER_SERVICE|badge\.permission|UPDATE_BADGE|BADGE_COUNT' apk-permissions.txt; then
             echo 'Unexpected permission in private APK'
             exit 1
           fi
