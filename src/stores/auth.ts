@@ -25,9 +25,9 @@ interface AuthState {
   lock: () => void
 }
 
-const DEFAULT_SETTINGS: AuthSettings = {
-  requireBiometric: false,
-  requireBiometricForMessages: false,
+export const DEFAULT_SETTINGS: AuthSettings = {
+  requireBiometric: true,
+  requireBiometricForMessages: true,
 }
 
 export const useAuth = create<AuthState>((set, get) => ({
@@ -58,7 +58,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       const settings: AuthSettings = stored ? JSON.parse(stored) : DEFAULT_SETTINGS
 
       // If biometric is not required, auto-authenticate
-      const isAuthenticated = !settings.requireBiometric
+      const isAuthenticated = !(settings.requireBiometric && hasBiometrics)
 
       set({
         hasBiometrics,

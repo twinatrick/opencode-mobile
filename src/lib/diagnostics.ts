@@ -215,7 +215,7 @@ async function sendReportToSupport(report: DiagnosticReport): Promise<void> {
 // consent is granted, a scrubbed copy is also delivered to the support
 // inbox so reports reach us even if the user cancels the share sheet.
 export async function shareReport(report: DiagnosticReport): Promise<void> {
-  const text = formatReport(report)
+  const text = formatReportForSupport(report)
   void sendReportToSupport(report)
   try {
     await Clipboard.setStringAsync(text)

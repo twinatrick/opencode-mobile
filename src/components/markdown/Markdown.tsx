@@ -1,7 +1,8 @@
 import { useMemo, type ReactNode } from "react"
-import { View, Text, useColorScheme, Platform, type StyleProp, type ViewStyle, type TextStyle } from "react-native"
+import { View, Text, Image, Linking, useColorScheme, Platform, type StyleProp, type ViewStyle, type TextStyle, type ImageStyle } from "react-native"
 import { useMarkdown, Renderer } from "react-native-marked"
 import { CodeBlock } from "./CodeBlock"
+import { isSafeExternalLinkUrl, isAllowedInlineImageUri, formatBlockedMarkdownImagePlaceholder } from "../../lib/markdown-security"
 
 // react-native-marked's base Renderer hardcodes `selectable` on every plain
 // text node it produces (text/strong/em/del/heading/codespan). On Android,
@@ -53,6 +54,52 @@ class CustomRenderer extends Renderer {
 
   codespan(text: string, styles?: TextStyle): ReactNode {
     return this.plainText(text, [styles, { fontStyle: "normal", fontWeight: "normal" }])
+  }
+
+  image(uri: string, alt?: string, style?: ImageStyle, _title?: string): ReactNode {
+    if (isAllowedInlineImageUri(uri)) {
+      return <Image key={this.getKey()} source={{ uri }} accessibilityLabel={alt} style={style} />
+    }
+    return this.plainText(formatBlockedMarkdownImagePlaceholder(alt, uri), {
+      fontSize: 13,
+      fontStyle: "italic",
+      color: "#6b7280",
+    })
+  }
+
+  linkImage(href: string, imageUrl: string, alt?: string, _style?: ImageStyle, _title?: string | null): ReactNode {
+    const placeholder = formatBlockedMarkdownImagePlaceholder(alt, imageUrl)
+    if (!isSafeExternalLinkUrl(href)) {
+      return this.plainText(placeholder, { fontSize: 13, fontStyle: "italic", color: "#6b7280" })
+    }
+    return (
+      <Text
+        key={this.getKey()}
+        style={{ color: "#8b5cf6", textDecorationLine: "underline" }}
+        onPress={() => {
+          void Linking.openURL(href).catch(() => {})
+        }}
+      >
+        {placeholder}
+      </Text>
+    )
+  }
+
+  link(children: string | ReactNode[], href: string, styles?: TextStyle, _title?: string): ReactNode {
+    if (!isSafeExternalLinkUrl(href)) {
+      return this.plainText(children, styles)
+    }
+    return (
+      <Text
+        key={this.getKey()}
+        style={styles}
+        onPress={() => {
+          void Linking.openURL(href).catch(() => {})
+        }}
+      >
+        {children}
+      </Text>
+    )
   }
 }
 

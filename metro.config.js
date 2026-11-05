@@ -1,22 +1,35 @@
-// Metro bundler config.
-//
-// Wraps Expo's default Metro config with Sentry's config so the JS bundle
-// gets a Debug ID embedded at build time (see
-// https://docs.sentry.io/platforms/react-native/manual-setup/metro/).
-//
-// Why this matters: without this, Metro/Hermes produce bundles + source maps
-// with NO debug ID. `android/sentry.gradle` (applied from
-// android/app/build.gradle) then falls back to associating the uploaded
-// source map with Sentry purely by `--release`/`--dist` string matching
-// (see its `has-sourcemap-debugid.js` check). That legacy path is fragile —
-// it silently breaks if the release/dist Gradle computes for the upload
-// ever drifts from the release/dist the app reports at runtime via
-// `Sentry.init()` (src/lib/sentry.ts). Debug ID matching sidesteps that
-// entire class of bug: the bundle and its source map are linked by an
-// embedded ID, independent of any release/dist string.
-const { getSentryExpoConfig } = require("@sentry/react-native/metro")
+const path = require("path")
+const { getDefaultConfig } = require("expo/metro-config")
 
-/** @type {import('expo/metro-config').MetroConfig} */
-const config = getSentryExpoConfig(__dirname)
+/**
+ * Private Build Metro Configuration
+ *
+ * 1. Uses Expo standard Metro config instead of `@sentry/react-native/metro` so
+ *    Sentry debug-ID injection and telemetry polyfills are excluded from the
+ *    compiled Hermes bundle (`index.android.bundle`).
+ * 2. Redirects `decode-uri-component` to `src/lib/safe-decode-uri-component.js`
+ *    so the vulnerable `node_modules/decode-uri-component@0.2.2` package is
+ *    never bundled into the Android APK.
+ */
+const config = getDefaultConfig(__dirname)
+
+const SAFE_DECODE_PATH = path.resolve(__dirname, "src/lib/safe-decode-uri-component.js")
+const upstreamResolveRequest = config.resolver?.resolveRequest
+
+config.resolver = {
+  ...config.resolver,
+  resolveRequest(context, moduleName, platform) {
+    if (moduleName === "decode-uri-component") {
+      return {
+        filePath: SAFE_DECODE_PATH,
+        type: "sourceFile",
+      }
+    }
+    if (upstreamResolveRequest) {
+      return upstreamResolveRequest(context, moduleName, platform)
+    }
+    return context.resolveRequest(context, moduleName, platform)
+  },
+}
 
 module.exports = config

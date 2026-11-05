@@ -31,10 +31,9 @@ name: All sessions across directories - list + open-across-project (regression #
 
 - launchApp:
     clearState: true
-- assertVisible:
-    id: "telemetry-consent-card"
 - tapOn:
     id: "telemetry-decline-button"
+    optional: true
 
 - assertVisible:
     text: "No Connection"

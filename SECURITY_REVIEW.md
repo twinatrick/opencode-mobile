@@ -16,7 +16,8 @@ Do not treat passing unit tests as a security certification.
 | Multiple remotes | connections store has saved connections and one active client | Preserved, no changes to switching behavior |
 | Optional hosted integrations | telemetry.ts, analytics.ts, sentry.ts, chatwoot.ts | Hard-disabled even when upstream environment variables or prior consent exist |
 | Other outbound requests | update-check.ts, diagnostics.ts, waitlist queue and connection UI | Automatic update discovery, public Google probe, waitlist retry and signup UI disabled |
-| Android permissions | app.json and native AndroidManifest.xml | Overlay and old shared-storage permissions blocked; backups disabled |
+| Android permissions | app.json, withPrivateBuildHardening.js, and native AndroidManifest.xml | Overlay, legacy shared-storage, camera, boot-completed, c2dm/finsky, and 15 OEM badge permissions blocked; backups disabled |
+| Android exported & native telemetry components | withPrivateBuildHardening.js and native AndroidManifest.xml | ClipboardFileProvider & CropImageActivity forced to exported=false; SentryInitProvider, SentryPerformanceProvider, FirebaseInitProvider, FirebaseMessagingService & Datatransport services removed via tools:node="remove" |
 | Voice | speech.ts | On-device recognition required; real-device support unverified |
 | Build pipeline | build.yml and private-build.yml | Test gate added; separate manual unsigned inspection build; no automatic installation |
 
@@ -72,3 +73,18 @@ server/project for multi-remote switching, permission-denial, biometric re-lock,
 attachments and background tests. Observe all traffic before entering valuable
 server credentials. Tailscale does not sandbox the client or the OpenCode agent.
 See PRIVATE_BUILD.md for connection instructions and signing limitations.
+
+### Phase 2 Code, Deep-Link, Markdown & Transport Hardening
+
+- **Cleartext HTTP Lockdown**: Replaced global `android:usesCleartextTraffic="true"` with `android:usesCleartextTraffic="false"` and `@xml/network_security_config` (`<base-config cleartextTrafficPermitted="false">`).
+- **Deep-Link Path Traversal & Query DoS Verification**: Added strict ID validation (`encodePathSegment` / `isSafeRouteId`) and verified in KVM Android 35 Emulator against path traversal (`opencode://session/..%2F..%2Fadmin`) and malformed percent-encoded query strings (`%25` x 300).
+- **Markdown Tracking Pixel & SSRF Prevention**: Overrode `image()`, `linkImage()`, and `link()` in `CustomRenderer` (`src/components/markdown/Markdown.tsx`) and guarded `MessageBubble.tsx` attachments so remote `http://`/`https://` images never auto-fetch.
+- **Logcat & Share Sheet Credential Scrubbing**: Enhanced `scrubString()` in `src/lib/scrub.ts` to redact `Basic`/`Bearer` headers and `opencode://` pairing secrets (`enc=`, `pin=`, `payload=`, `pw=`), applied it in `src/lib/logbuffer.ts`, and updated `shareReport()` in `src/lib/diagnostics.ts` to always export `formatReportForSupport()`.
+
+### Phase 3 Native/JS Footprint Elimination, Biometric Default & Encrypted QR Pairing
+
+- **Eliminated Sentry/PostHog Native & JS Bundle Footprint**: Disabled `@sentry/react-native` autolinking in `react-native.config.js`, excluded `libsentry.so`/`libsentry-android.so` in `withPrivateBuildHardening.js` (`0` native Sentry `.so` libraries in the final APK), and removed runtime imports of `@sentry/react-native` and `posthog-react-native` from `src/lib/sentry.ts` and `src/lib/analytics.ts`.
+- **Eliminated `decode-uri-component` Runtime Advisory (`0/32` Bundled)**: Redirected `decode-uri-component` in `metro.config.js` to `src/lib/safe-decode-uri-component.js` (linear-time single-pass decoder).
+- **Biometric Lock Default ON & Connection Security Warnings**: Enabled `requireBiometric: true` and `requireBiometricForMessages: true` by default in `src/stores/auth.ts`, and added Tailscale/HTTPS transport and empty-password warnings in `src/lib/connection-security.ts` and `app/connection/add.tsx`.
+- **One-Time Token QR Code Pairing (256-bit CSPRNG Token + Single-Use + 5m TTL + 5-Attempt Rate Limit + Clipboard Auto-Wipe)**: Replaced low-entropy PIN encryption with `scripts/opencode-qr.mjs` and `src/lib/qr-pairing.ts` using a 256-bit CSPRNG one-time token (`crypto.randomBytes(32)`) redeemed via `POST /__opencode_pairing/redeem` (5-minute TTL, single-use invalidation, 5-attempt rate limit, zero long-term server password in QR payload, default `127.0.0.1` bind host, redacted terminal/JSON logs, automatic clipboard clearing `Clipboard.setStringAsync("")`, and fixed `.MainActivity` `<category android:name="android.intent.category.DEFAULT" />` without requiring `android.permission.CAMERA`).
+  - Verified Unsigned Release APK SHA-256: `fc3589bda2f057f85b8db520025a066753724bb7f85bb817c919f3db5d5f4717` (`395/395` unit tests passed, KVM Android 35 Emulator verified).

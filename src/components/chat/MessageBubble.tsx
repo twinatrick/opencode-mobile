@@ -2,6 +2,7 @@ import { memo } from "react"
 import { View, Text, Image, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Platform } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { Markdown } from "../markdown"
+import { isAllowedInlineImageUri, formatBlockedMarkdownImagePlaceholder } from "../../lib/markdown-security"
 import { ToolCallCard } from "./ToolCallCard"
 import { ReasoningBlock } from "./ReasoningBlock"
 import type { Message, Part } from "../../lib/sdk"
@@ -105,7 +106,13 @@ export const MessageBubble = memo(
           >
             {fileParts.map((fp) => (
               <View key={fp.id} style={s.imageWrap}>
-                <Image source={{ uri: fp.url }} style={s.attachedImage} resizeMode="cover" />
+                {isAllowedInlineImageUri(fp.url) ? (
+                  <Image source={{ uri: fp.url }} style={s.attachedImage} resizeMode="cover" />
+                ) : (
+                  <Text style={[s.imageLabel, isDark && s.imageLabelDark]} numberOfLines={2}>
+                    {formatBlockedMarkdownImagePlaceholder(fp.filename, fp.url)}
+                  </Text>
+                )}
                 {fp.filename && (
                   <Text style={[s.imageLabel, isDark && s.imageLabelDark]} numberOfLines={1}>
                     {fp.filename}

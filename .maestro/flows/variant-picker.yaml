@@ -29,10 +29,9 @@ name: Variant picker - reasoning-effort chip renders, selects, and still sends
 
 - launchApp:
     clearState: true
-- assertVisible:
-    id: "telemetry-consent-card"
 - tapOn:
     id: "telemetry-decline-button"
+    optional: true
 
 - assertVisible:
     text: "No Connection"

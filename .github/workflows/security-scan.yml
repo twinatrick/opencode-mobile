@@ -7,9 +7,9 @@ name: Security scan
 
 on:
   push:
-    branches: [main]
+    branches: [main, "audit/**", "test/**"]
   pull_request:
-    branches: [main]
+    branches: [main, "audit/**", "test/**"]
 
 permissions:
   contents: read
